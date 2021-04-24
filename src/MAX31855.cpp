@@ -24,7 +24,6 @@ bool MAX31855_Class::begin(const uint8_t chipSelect, const bool reverse) {
   _cs       = chipSelect;   // Copy value for later use
   pinMode(_cs, OUTPUT);     // Make the chip select pin output
   digitalWrite(_cs, HIGH);  // High means ignore master
-  SPI.begin();              // Initialize SPI communication
   readRaw();                // Try to read the raw data
   return (bool)_errorCode;  // Return error code as a boolean value
 }  // of method begin()
