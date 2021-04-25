@@ -27,6 +27,7 @@ bool MAX31855_Class::begin(const uint8_t chipSelect, const bool reverse) {
   readRaw();                // Try to read the raw data
   return (bool)_errorCode;  // Return error code as a boolean value
 }  // of method begin()
+
 bool MAX31855_Class::begin(const uint8_t chipSelect, const uint8_t miso, const uint8_t sck,
                            const bool reverse) {
   /*!
@@ -53,6 +54,7 @@ bool MAX31855_Class::begin(const uint8_t chipSelect, const uint8_t miso, const u
   readRaw();                // Read the raw data
   return (bool)_errorCode;  // Return error code as a boolean value
 }  // of method begin()
+
 uint8_t MAX31855_Class::fault() const {
   /*!
    @brief   Return the device fault state
@@ -62,6 +64,7 @@ uint8_t MAX31855_Class::fault() const {
   */
   return _errorCode;
 }  // of method fault()
+
 int32_t MAX31855_Class::readRaw() {
   /*!
    @brief   returns the 32 bits of raw data from the MAX31855 device
@@ -70,84 +73,90 @@ int32_t MAX31855_Class::readRaw() {
    @return  Raw temperature reading
   */
   int32_t dataBuffer = 0;
-  for (uint8_t retryCounter = 0; retryCounter < READING_RETRIES;
-       retryCounter++)  // Loop until good reading or overflow
+  digitalWrite(_cs, LOW);                     // Tell MAX31855 that it is active
+  if (_sck == 0)                              // Hardware SPI
   {
-    digitalWrite(_cs, LOW);                     // Tell MAX31855 that it is active
-    delayMicroseconds(SPI_DELAY_MICROSECONDS);  // Give device time to respond
-    if (_sck == 0)                              // Hardware SPI
-    {
-      SPI.beginTransaction(
-          SPISettings(14000000, MSBFIRST, SPI_MODE0));  // Start transaction at 14MHz MSB
-      dataBuffer = SPI.transfer(0);                     // Read a byte
-      dataBuffer <<= 8;                                 // Shift over left 8 bits
-      dataBuffer |= SPI.transfer(0);                    // Read a byte
-      dataBuffer <<= 8;                                 // Shift over left 8 bits
-      dataBuffer |= SPI.transfer(0);                    // Read a byte
-      dataBuffer <<= 8;                                 // Shift over left 8 bits
-      dataBuffer |= SPI.transfer(0);                    // Read a byte
-      SPI.endTransaction();                             // Terminate SPI transaction
-    } else                                              // Software SPI
-    {
-      digitalWrite(_sck, LOW);                      // Toggle the system clock low
-      delayMicroseconds(SPI_DELAY_MICROSECONDS);    // Give device time to respond
-      for (uint8_t i = 0; i < 32; i++) {            // Loop for each bit to be read
-        digitalWrite(_sck, LOW);                    // Toggle the system clock low
-        delayMicroseconds(SPI_DELAY_MICROSECONDS);  // Give device time to respond
-        dataBuffer <<= 1;                           // Shift over 1 bit
-        if (digitalRead(_miso)) dataBuffer |= 1;    // set rightmost bit if true
-        digitalWrite(_sck, HIGH);                   // Toggle the system clock high
-        delayMicroseconds(SPI_DELAY_MICROSECONDS);  // Give device time to respond
-      }                                             // of read each bit from software SPI bus
-    }                                               // of if-then-else we are using HW SPI
-    digitalWrite(_cs, HIGH);                        // MAX31855 no longer active
-    _errorCode = dataBuffer & B111;                 // Mask fault code bits
-    if (!_errorCode) {
-      break;    // Leave loop as soon as we get a good reading
-    }           // if-then no error found
-    delay(25);  // Wait a bit before retrying
-  }             // of for-next number of retries
+    SPI.beginTransaction(
+        SPISettings(14000000, MSBFIRST, SPI_MODE0));  // Start transaction at 14MHz MSB
+    dataBuffer = SPI.transfer(0);                     // Read a byte
+    dataBuffer <<= 8;                                 // Shift over left 8 bits
+    dataBuffer |= SPI.transfer(0);                    // Read a byte
+    dataBuffer <<= 8;                                 // Shift over left 8 bits
+    dataBuffer |= SPI.transfer(0);                    // Read a byte
+    dataBuffer <<= 8;                                 // Shift over left 8 bits
+    dataBuffer |= SPI.transfer(0);                    // Read a byte
+    SPI.endTransaction();                             // Terminate SPI transaction
+  } else                                              // Software SPI
+  {
+    digitalWrite(_sck, LOW);                      // Toggle the system clock low
+    delayMicroseconds(SPI_DELAY_MICROSECONDS);    // Give device time to respond
+    for (uint8_t i = 0; i < 32; i++) {            // Loop for each bit to be read
+      digitalWrite(_sck, LOW);                    // Toggle the system clock low
+      delayMicroseconds(SPI_DELAY_MICROSECONDS);  // Give device time to respond
+      dataBuffer <<= 1;                           // Shift over 1 bit
+      if (digitalRead(_miso)) dataBuffer |= 1;    // set rightmost bit if true
+      digitalWrite(_sck, HIGH);                   // Toggle the system clock high
+      delayMicroseconds(SPI_DELAY_MICROSECONDS);  // Give device time to respond
+    }                                             // of read each bit from software SPI bus
+  }                                               // of if-then-else we are using HW SPI
+  digitalWrite(_cs, HIGH);                        // MAX31855 no longer active
   return dataBuffer;
 }  // of method readRaw()
-int32_t MAX31855_Class::readProbe() {
+
+int16_t MAX31855_Class::rawToProbe(int32_t rawBuffer) {
   /*!
-   @brief   returns the probe temperature
-   @details The temperature is returned in milli-degrees Celsius so that no floating point needs to
-             be used and no precision is lost
-   @return  Probe Temperature in milli/degrees
+   @brief   returns the probe temperature given the raw reading
+   @details The temperature is returned as a signed 16-bit integer. 
+            As the ADC gives a 14-bit signed integer for the probe temperature,
+            the 2 least significant bits should be zero. If they are
+            non-zero, this is indication of an error.
+            Note that putting the probe temperature as a 16-bit integer
+            effectively means that the magnitude of the temperature is 4 times
+            larger and should be normalized by a quarter of the resolution.
+   @return  Probe Temperature as a signed 16-bit integer
   */
-  int32_t rawBuffer  = readRaw();  // Read the raw data into variable
-  int32_t dataBuffer = rawBuffer;  // Copy to working variable
-  if (dataBuffer & B111)
-    dataBuffer = INT32_MAX;  // if any error bits are set then return error value
+  int32_t dataBuffer = rawBuffer;  // Copy raw reading to working variable
+  int16_t probeTemp;
+  int16_t ambientTemp;
+  if (dataBuffer & B111) {
+    probeTemp = INT16_MAX;  // if any error bits are set then return error value
+    return probeTemp;
+  }
   else {
-    dataBuffer = dataBuffer >> 18;                     // remove unused ambient values
-    if (dataBuffer & 0x2000) dataBuffer |= 0xFFFE000;  // 2s complement bits if negative
-    dataBuffer *= (int32_t)250;                        // Sensitivity is 0.25°C
-  }                                                    // of if we have an error
-  if (_reversed)  // If the thermocouple pins are reversed we have to switch readings around
+    dataBuffer = dataBuffer >> 18; // remove unused ambient values
+    dataBuffer = dataBuffer << 2;  // shift 2 bits left to get align 14 bits on 16
+    probeTemp = (int16_t) dataBuffer; // get value as a signed 16-bit integer
+  }
+  if (_reversed) // If the thermocouple pins are reversed we have to switch readings around
   {
-    int32_t ambientBuffer = (rawBuffer & 0xFFFF) >> 4;             // remove probe & fault values
-    if (ambientBuffer & 0x2000) ambientBuffer |= 0xFFFF000;        // 2s complement bits if negative
-    ambientBuffer = ambientBuffer * (int32_t)625 / (int32_t)10;    // Sensitivity is 0.0625°C
-    dataBuffer    = (ambientBuffer - dataBuffer) + ambientBuffer;  // Invert the delta temperature
-  }  // of if-then the thermocouple pins reversed
-  return dataBuffer;
-}  // of method readProbe()
-int32_t MAX31855_Class::readAmbient() {
+    int32_t ambientBuffer = (rawBuffer & 0xFFFF) >> 4; // remove probe & fault values
+    ambientBuffer = ambientBuffer << 4; // shift 4 bits left to get align 12 bits on 16
+    ambientTemp = (int16_t) ambientBuffer; // get value as a signed 16-bit integer
+    // Invert the delta temperature taking into account relative sensitivity
+    probeTemp = (ambientTemp / 4 - probeTemp) + ambientTemp / 4; 
+  }
+  return probeTemp;
+}  // of method rawToProbe()
+
+int16_t MAX31855_Class::rawToAmbient(int32_t rawBuffer) {
   /*!
-   @brief   returns the ambient temperature
-   @details The temperature is returned in milli-degrees Celsius so that no floating point needs to
-            be used and no precision is lost
-   @return  Ambient Temperature in milli/degrees
+   @brief   returns the ambient temperature given the raw reading
+   @details The temperature is returned as a signed 16-bit integer. 
+            As the ADC gives a 12-bit signed integer for the ambient temperature,
+            the 4 least significant bits should be zero. If they are
+            non-zero, this is indication of an error.
+            Note that putting the ambient temperature as a 16-bit integer
+            effectively means that the magnitude of the temperature is 16 times
+            larger and should be normalized by 1/16 of the resolution.
+   @return  Ambient Temperature as a signed 16-bit integer
   */
-  int32_t dataBuffer = readRaw();  // Read the raw data into variable
-  if (dataBuffer & B111)
-    dataBuffer = INT32_MAX;  // if error bits set then return error
+  int32_t dataBuffer = rawBuffer;  // Copy raw reading to working variable
+  if (dataBuffer & B111) {
+    dataBuffer = INT16_MAX;  // if error bits set then return error
+  }
   else {
-    dataBuffer = (dataBuffer & 0xFFFF) >> 4;               // remove probe & fault values
-    if (dataBuffer & 0x2000) dataBuffer |= 0xFFFF000;      // 2s complement bits if negative
-    dataBuffer = dataBuffer * (int32_t)625 / (int32_t)10;  // Sensitivity is 0.0625°C
-  }                                                        // of if we have an error
-  return dataBuffer;
+    dataBuffer = (dataBuffer & 0xFFFF) >> 4; // remove probe & fault values
+    dataBuffer = dataBuffer << 4;  // shift 2 bits left to get align 14 bits on 16
+  } // of if we have an error
+  return (int16_t) dataBuffer; // return value as a signed 16-bit integer
 }  // of method readAmbient()
