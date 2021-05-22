@@ -99,6 +99,7 @@ int32_t MAX31855_Class::readRaw() {
       delayMicroseconds(SPI_DELAY_MICROSECONDS);  // Give device time to respond
     }                                             // of read each bit from software SPI bus
   }                                               // of if-then-else we are using HW SPI
+  _errorCode = dataBuffer & B111;                 // Mask fault code bits
   digitalWrite(_cs, HIGH);                        // MAX31855 no longer active
   return dataBuffer;
 }  // of method readRaw()
