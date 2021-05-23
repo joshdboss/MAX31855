@@ -52,7 +52,7 @@ bool MAX31855_Class::begin(const uint8_t chipSelect, const uint8_t miso, const u
   pinMode(_sck, OUTPUT);    // Make system clock pin output
   pinMode(_miso, INPUT);    // Make master-in slave-out input
   readRaw();                // Read the raw data
-  return (bool)_errorCode;  // Return error code as a boolean value
+  return !(bool)_errorCode; // Return if successful (no errors)
 }  // of method begin()
 
 uint8_t MAX31855_Class::fault() const {
